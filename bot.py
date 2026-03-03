@@ -54,4 +54,24 @@ def now() -> float:
 
 def cleanup_expired() -> None:
     t = now()
+    expired = [uid for uid, e in otp_store    "2) Verifica enviando el código (6 dígitos)\n"
+)
+
+# ====== STATE ======
+@dataclass
+class OTPEntry:
+    code: str
+    expires_at: float
+    attempts_left: int
+
+otp_store: Dict[int, OTPEntry] = {}         # user_id -> OTP
+awaiting_code: Dict[int, bool] = {}         # user_id -> esperando OTP
+last_gen_at: Dict[int, float] = {}          # user_id -> timestamp último generate
+
+
+def now() -> float:
+    return time.time()
+
+def cleanup_expired() -> None:
+    t = now()
     expired = [uid for uid, e in otp_store
