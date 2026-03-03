@@ -20,7 +20,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 OTP_TTL_SECONDS = 180
 OTP_MAX_ATTEMPTS = 5
-SHOW_OTP_IN_CHAT = False  # True si quieres ver el código en el chat
+SHOW_OTP_IN_CHAT = False  # Cambia a True si quieres ver el código
 
 BRAND = "𝗜𝗟 𝗠𝗔𝗥𝗥𝗢𝗖𝗖𝗛𝗜𝗡𝗢 │ 𝗢𝗧𝗣 𝗦𝗘𝗖𝗨𝗥𝗜𝗧𝗬"
 
@@ -80,7 +80,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
     if not is_allowed(user.id):
-        await update.message.reply_text("🔒 Acceso restringido. Solicitud enviada al administrador.")
+        await update.message.reply_text(
+            "🔒 Acceso restringido. Solicitud enviada al administrador."
+        )
         await send_access_request(context, user)
         return
 
