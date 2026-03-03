@@ -1,104 +1,57 @@
 import os
 import time
 import secrets
+from dataclasses import dataclass
+from typing import Dict, Optional
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler,
+    MessageHandler, ContextTypes, filters
+)
 
+# ====== CONFIG (Railway Variables) ======
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-OTP_TTL = int(os.getenv("OTP_TTL_SECONDS", "180"))
 
-OTP_STORE = {}
-BRAND = "IL MARROCHINO | OTP SECURITY"
+OTP_TTL_SECONDS = int(os.getenv("OTP_TTL_SECONDS", "180"))           # 3 min
+OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))           # intentos
+GEN_RATE_LIMIT_SECONDS = int(os.getenv("GEN_RATE_LIMIT_SECONDS", "30"))  # 30s
+SHOW_OTP_IN_CHAT = os.getenv("SHOW_OTP_IN_CHAT", "false").lower() in ("1","true","yes","y")
 
-def main_menu():
-    keyboard = [
-        [InlineKeyboardButton("🔑 Generar OTP", callback_data="gen")],
-        [InlineKeyboardButton("✅ Verificar OTP", callback_data="verify")],
-        [InlineKeyboardButton("📊 Estado", callback_data="status")],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+BRAND = "𝗜𝗟 𝗠𝗔𝗥𝗥𝗢𝗖𝗖𝗛𝗜𝗡𝗢 │ 𝗢𝗧𝗣 𝗦𝗘𝗖𝗨𝗥𝗜𝗧𝗬"
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        f"{BRAND}\n\n🔐 Sistema OTP activo.\nSelecciona una opción:",
-        reply_markup=main_menu()
-    )
+START_TEXT = (
+    f"{BRAND}\n\n"
+    "🔐 Infraestructura OTP operativa.\n"
+    "Selecciona una acción:"
+)
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
+HELP_TEXT = (
+    f"{BRAND}\n\n"
+    "Comandos:\n"
+    "/start — menú principal\n"
+    "/status — estado del OTP\n"
+    "/help — ayuda\n\n"
+    "Uso:\n"
+    "1) Genera un OTP\n"
+    "2) Verifica enviando el código (6 dígitos)\n"
+)
 
-    if query.data == "gen":
-        code = f"{secrets.randbelow(1_000_000):06d}"
-        OTP_STORE[user_id] = (code, time.time() + OTP_TTL)
+# ====== STATE ======
+@dataclass
+class OTPEntry:
+    code: str
+    expires_at: float
+    attempts_left: int
 
-        await query.edit_message_text(
-            f"{BRAND}\n\n🔑 OTP generado:\n`{code}`\n\n⏳ Válido por {OTP_TTL//60} min.",
-            parse_mode="Markdown",
-            reply_markup=main_menu()
-        )
+otp_store: Dict[int, OTPEntry] = {}         # user_id -> OTP
+awaiting_code: Dict[int, bool] = {}         # user_id -> esperando OTP
+last_gen_at: Dict[int, float] = {}          # user_id -> timestamp último generate
 
-    elif query.data == "verify":
-        await query.edit_message_text(
-            f"{BRAND}\n\n✅ Envíame el código OTP (6 dígitos).",
-            reply_markup=main_menu()
-        )
 
-    elif query.data == "status":
-        entry = OTP_STORE.get(user_id)
-        if not entry:
-            await query.edit_message_text(
-                f"{BRAND}\n\n📊 No hay OTP activo.",
-                reply_markup=main_menu()
-            )
-            return
+def now() -> float:
+    return time.time()
 
-        code, exp = entry
-        if exp < time.time():
-            OTP_STORE.pop(user_id, None)
-            await query.edit_message_text(
-                f"{BRAND}\n\n📊 OTP expirado.",
-                reply_markup=main_menu()
-            )
-            return
-
-        remaining = int(exp - time.time())
-        await query.edit_message_text(
-            f"{BRAND}\n\n📊 OTP activo.\nExpira en {remaining} segundos.",
-            reply_markup=main_menu()
-        )
-
-async def check_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    text = (update.message.text or "").strip()
-
-    entry = OTP_STORE.get(user_id)
-    if not entry:
-        return
-
-    code, exp = entry
-    if exp < time.time():
-        OTP_STORE.pop(user_id, None)
-        await update.message.reply_text("❌ OTP expirado.")
-        return
-
-    if text.isdigit() and len(text) == 6 and secrets.compare_digest(text, code):
-        OTP_STORE.pop(user_id, None)
-        await update.message.reply_text("✅ OTP verificado correctamente.", reply_markup=main_menu())
-    else:
-        await update.message.reply_text("❌ OTP incorrecto.")
-
-def main():
-    if not BOT_TOKEN:
-        raise SystemExit("Falta BOT_TOKEN en variables de entorno (Railway).")
-
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, check_otp))
-
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+def cleanup_expired() -> None:
+    t = now()
+    expired = [uid for uid, e in otp_store
